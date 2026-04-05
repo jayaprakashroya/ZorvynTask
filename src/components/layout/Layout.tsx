@@ -28,20 +28,22 @@ const Layout: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      <Sidebar
-        isOpen={sidebarOpen}
-        toggleSidebar={toggleSidebar}
-        currentPage={currentPage}
-        setCurrentPage={setCurrentPage}
-      />
+    <div className="min-h-screen flex flex-col text-slate-100">
+      <div className="flex flex-1">
+        <Sidebar
+          isOpen={sidebarOpen}
+          toggleSidebar={toggleSidebar}
+          currentPage={currentPage}
+          setCurrentPage={setCurrentPage}
+        />
 
-      <div className="lg:pl-64">
-        <Header toggleSidebar={toggleSidebar} />
+        <div className="flex flex-1 flex-col lg:pl-0">
+          <Header />
 
-        <main className="p-4 sm:p-6 lg:p-8">
-          {renderPage()}
-        </main>
+          <main className="flex-1 p-4 sm:p-6 lg:p-8">
+            {renderPage()}
+          </main>
+        </div>
       </div>
     </div>
   );

@@ -1,7 +1,10 @@
 {
   "name": "finance-dashboard",
+  "version": "1.0.0",
+  "description": "A modern Finance Dashboard UI built with React 18, TypeScript, and Tailwind CSS",
+  "author": "Jaya Prakash Roya",
+  "license": "MIT",
   "private": true,
-  "version": "0.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",

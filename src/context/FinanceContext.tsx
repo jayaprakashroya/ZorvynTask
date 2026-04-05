@@ -1,29 +1,8 @@
-import React, { createContext, ReactNode, useContext, useEffect, useState } from 'react';
+import React, { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { mockTransactions } from '../data/mockData';
-import { SummaryData, Transaction } from '../types';
-
-type Role = 'Viewer' | 'Admin';
-
-interface Filters {
-  searchTerm: string;
-  typeFilter: 'all' | 'income' | 'expense';
-  categoryFilter: string;
-  dateFilter: 'all' | 'thisMonth' | 'last3Months';
-}
-
-interface FinanceContextType {
-  transactions: Transaction[];
-  summaryData: SummaryData;
-  currentRole: Role;
-  filters: Filters;
-  darkMode: boolean;
-  addTransaction: (transaction: Transaction) => void;
-  updateTransaction: (id: string, transaction: Partial<Transaction>) => void;
-  deleteTransaction: (id: string) => void;
-  setCurrentRole: (role: Role) => void;
-  setFilters: (filters: Partial<Filters>) => void;
-  toggleDarkMode: () => void;
-}
+import { Filters, FinanceContextType, Transaction, UserRole } from '../types';
+import { DATE_FILTERS, STORAGE_KEYS, USER_ROLES } from '../utils/constants';
+import { calculateSummaryData, exportToCSV, generateId, validateTransaction } from '../utils/helpers';
 
 const FinanceContext = createContext<FinanceContextType | undefined>(undefined);
 
@@ -37,104 +16,126 @@ export const useFinance = () => {
 
 export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [transactions, setTransactions] = useState<Transaction[]>(() => {
-    const saved = localStorage.getItem('transactions');
-    return saved ? JSON.parse(saved).map((t: any) => ({ ...t, date: new Date(t.date) })) : mockTransactions;
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.TRANSACTIONS);
+      return saved ? JSON.parse(saved).map((t: any) => ({ ...t, date: new Date(t.date) })) : mockTransactions;
+    } catch (error) {
+      console.error('Error loading transactions from localStorage:', error);
+      return mockTransactions;
+    }
   });
 
-  const [currentRole, setCurrentRole] = useState<Role>(() => {
-    const saved = localStorage.getItem('currentRole');
-    return (saved as Role) || 'Admin';
+  const [currentRole, setCurrentRole] = useState<UserRole>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.CURRENT_ROLE);
+      return (saved as UserRole) || USER_ROLES.ADMIN;
+    } catch (error) {
+      console.error('Error loading role from localStorage:', error);
+      return USER_ROLES.ADMIN;
+    }
   });
 
   const [filters, setFiltersState] = useState<Filters>({
     searchTerm: '',
     typeFilter: 'all',
     categoryFilter: 'all',
-    dateFilter: 'all',
+    dateFilter: DATE_FILTERS.ALL,
   });
 
   const [darkMode, setDarkMode] = useState<boolean>(() => {
-    const saved = localStorage.getItem('darkMode');
-    return saved ? JSON.parse(saved) : false;
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.DARK_MODE);
+      return saved ? JSON.parse(saved) : false;
+    } catch (error) {
+      console.error('Error loading dark mode from localStorage:', error);
+      return false;
+    }
   });
 
-  // Calculate summary data
-  const calculateSummary = (txns: Transaction[]): SummaryData => {
-    const now = new Date();
-    const thisMonth = now.getMonth();
-    const thisYear = now.getFullYear();
+  // Memoized summary data calculation
+  const summaryData = useMemo(() => calculateSummaryData(transactions), [transactions]);
 
-    const totalIncome = txns
-      .filter(t => t.type === 'income')
-      .reduce((sum, t) => sum + t.amount, 0);
-
-    const totalExpenses = Math.abs(txns
-      .filter(t => t.type === 'expense')
-      .reduce((sum, t) => sum + t.amount, 0));
-
-    const thisMonthIncome = txns
-      .filter(t => t.type === 'income' && t.date.getMonth() === thisMonth && t.date.getFullYear() === thisYear)
-      .reduce((sum, t) => sum + t.amount, 0);
-
-    const thisMonthExpenses = Math.abs(txns
-      .filter(t => t.type === 'expense' && t.date.getMonth() === thisMonth && t.date.getFullYear() === thisYear)
-      .reduce((sum, t) => sum + t.amount, 0));
-
-    const totalBalance = totalIncome - totalExpenses;
-
-    return {
-      totalBalance,
-      totalIncome,
-      totalExpenses,
-      thisMonthIncome,
-      thisMonthExpenses,
-    };
-  };
-
-  const currentSummaryData = calculateSummary(transactions);
-
+  // Persist transactions to localStorage
   useEffect(() => {
-    localStorage.setItem('transactions', JSON.stringify(transactions));
+    try {
+      localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(transactions));
+    } catch (error) {
+      console.error('Error saving transactions to localStorage:', error);
+    }
   }, [transactions]);
 
+  // Persist role to localStorage
   useEffect(() => {
-    localStorage.setItem('currentRole', currentRole);
+    try {
+      localStorage.setItem(STORAGE_KEYS.CURRENT_ROLE, currentRole);
+    } catch (error) {
+      console.error('Error saving role to localStorage:', error);
+    }
   }, [currentRole]);
 
+  // Handle dark mode
   useEffect(() => {
-    localStorage.setItem('darkMode', JSON.stringify(darkMode));
-    if (darkMode) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
+    try {
+      localStorage.setItem(STORAGE_KEYS.DARK_MODE, JSON.stringify(darkMode));
+      if (darkMode) {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
+    } catch (error) {
+      console.error('Error saving dark mode to localStorage:', error);
     }
   }, [darkMode]);
 
-  const addTransaction = (transaction: Transaction) => {
-    setTransactions(prev => [...prev, transaction]);
-  };
+  const addTransaction = useCallback((transactionData: Omit<Transaction, 'id'>) => {
+    const newTransaction: Transaction = {
+      ...transactionData,
+      id: generateId(),
+    };
 
-  const updateTransaction = (id: string, updatedFields: Partial<Transaction>) => {
+    const errors = validateTransaction(newTransaction);
+    if (errors.length > 0) {
+      throw new Error(`Validation failed: ${errors.join(', ')}`);
+    }
+
+    setTransactions(prev => [...prev, newTransaction]);
+  }, []);
+
+  const updateTransaction = useCallback((id: string, updates: Partial<Transaction>) => {
     setTransactions(prev =>
-      prev.map(t => t.id === id ? { ...t, ...updatedFields } : t)
+      prev.map(t => {
+        if (t.id === id) {
+          const updatedTransaction = { ...t, ...updates };
+          const errors = validateTransaction(updatedTransaction);
+          if (errors.length > 0) {
+            throw new Error(`Validation failed: ${errors.join(', ')}`);
+          }
+          return updatedTransaction;
+        }
+        return t;
+      })
     );
-  };
+  }, []);
 
-  const deleteTransaction = (id: string) => {
+  const deleteTransaction = useCallback((id: string) => {
     setTransactions(prev => prev.filter(t => t.id !== id));
-  };
+  }, []);
 
-  const setFilters = (newFilters: Partial<Filters>) => {
+  const setFilters = useCallback((newFilters: Partial<Filters>) => {
     setFiltersState(prev => ({ ...prev, ...newFilters }));
-  };
+  }, []);
 
-  const toggleDarkMode = () => {
+  const toggleDarkMode = useCallback(() => {
     setDarkMode(prev => !prev);
-  };
+  }, []);
 
-  const value: FinanceContextType = {
+  const exportTransactions = useCallback(() => {
+    exportToCSV(transactions);
+  }, [transactions]);
+
+  const value: FinanceContextType = useMemo(() => ({
     transactions,
-    summaryData: currentSummaryData,
+    summaryData,
     currentRole,
     filters,
     darkMode,
@@ -144,7 +145,20 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
     setCurrentRole,
     setFilters,
     toggleDarkMode,
-  };
+    exportTransactions,
+  }), [
+    transactions,
+    summaryData,
+    currentRole,
+    filters,
+    darkMode,
+    addTransaction,
+    updateTransaction,
+    deleteTransaction,
+    setFilters,
+    toggleDarkMode,
+    exportTransactions,
+  ]);
 
   return (
     <FinanceContext.Provider value={value}>
